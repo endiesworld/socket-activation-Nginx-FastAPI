@@ -1,0 +1,14 @@
+[Unit]
+Description=MyApp Unix Socket (socket activation)
+
+[Socket]
+ListenStream=/run/fastAPI/fastAPI.sock
+SocketUser=fastAPI
+SocketGroup=http
+SocketMode=0660
+Accept=no
+Backlog=128
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

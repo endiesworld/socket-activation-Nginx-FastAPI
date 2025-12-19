@@ -1,0 +1,34 @@
+[Unit]
+Description=fastAPI API (Gunicorn/Uvicorn) - socket activated (Unix)
+Requires=fastAPI-unix.socket
+After=fastAPI-unix.socket
+
+[Service]
+Type=notify
+WatchdogSec=10
+User=fastAPI
+Group=fastAPI
+WorkingDirectory=/opt/fastAPI/current
+EnvironmentFile=/etc/fastAPI/fastAPI.env
+
+# Use the uv-managed venv inside the deployed release
+ExecStart=/opt/fastAPI/current/.venv/bin/gunicorn \
+  -k uvicorn.workers.UvicornWorker \
+  --workers 2 \
+  --bind fd://3 \
+  --access-logfile - \
+  --error-logfile - \
+  app.main:app
+
+Restart=on-failure
+RestartSec=2
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target
