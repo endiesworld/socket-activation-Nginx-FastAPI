@@ -171,42 +171,6 @@ sudo ln -sfn /opt/fastAPI/releases/<RELEASE_ID> /opt/fastAPI/current
 sudo systemctl restart fastAPI-unix.service
 ```
 
----
-
-## Troubleshooting (Arch + systemd)
-
-### Nginx returns 502 / cannot connect to upstream
-
-- Confirm the socket exists: `ls -la /run/fastAPI/fastAPI.sock`
-- Confirm socket unit is active: `systemctl status fastAPI-unix.socket`
-- Trigger the service manually: `sudo curl --unix-socket /run/fastAPI/fastAPI.sock http://localhost/health`
-- Inspect logs: `sudo journalctl -u fastAPI-unix.service -n 200 --no-pager`
-
-### `permission denied` when nginx connects to the socket
-
-- Confirm nginx runs as user/group `http` on Arch: `ps -o user,group,comm -C nginx`
-- Confirm socket ownership/mode: `ls -la /run/fastAPI/fastAPI.sock` (should be `fastapi:http` and `srw-rw----` when using nginx)
-- If you use a different nginx user/group, update:
-  - `/etc/systemd/system/fastAPI-unix.socket` (`SocketGroup=...`)
-  - `/etc/tmpfiles.d/fastAPI.conf` (directory group)
-  - then run `sudo systemctl daemon-reload && sudo systemctl restart fastAPI-unix.socket`
-
-### `/run/fastAPI` missing after reboot
-
-Recreate it:
-
-```bash
-sudo systemd-tmpfiles --create /etc/tmpfiles.d/fastAPI.conf
-```
-
-### Dependency install fails during deploy
-
-- Ensure `uv` is installed system-wide: `command -v uv`
-- Re-run in the release directory to see the error:
-  - `cd /opt/fastAPI/current && sudo -u fastapi uv sync --locked`
-
----
-
 ## Layout
 
 - `app/` – FastAPI application code
