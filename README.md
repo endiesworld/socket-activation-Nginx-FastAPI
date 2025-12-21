@@ -16,25 +16,6 @@ This repo provides:
 - Provisioning script: `ops/scripts/provisioning.sh` (one-time)
 - Deployment script: `ops/scripts/deploy.sh` (repeatable)
 
-## Getting the code onto your server
-
-### Recommended: clone with git
-
-```bash
-sudo pacman -S --needed git
-git clone https://github.com/endiesworld/socket-activation-Nginx-FastAPI.git
-cd socket-activation-Nginx-FastAPI
-```
-
-### Alternative: download a ZIP (no git history)
-
-```bash
-sudo pacman -S --needed curl unzip
-curl -L -o project.zip https://github.com/endiesworld/socket-activation-Nginx-FastAPI/archive/refs/heads/main.zip
-unzip project.zip
-cd socket-activation-Nginx-FastAPI-main
-```
-
 ## What you get
 
 - FastAPI app: `app/main.py` (`GET /health`)
