@@ -1,9 +1,9 @@
 [Unit]
-Description=MyApp Unix Socket (socket activation)
+Description=fastAPI Unix Socket (socket activation)
 
 [Socket]
 ListenStream=/run/fastAPI/fastAPI.sock
-SocketUser=fastAPI
+SocketUser=fastapi
 SocketGroup=http
 SocketMode=0660
 Accept=no

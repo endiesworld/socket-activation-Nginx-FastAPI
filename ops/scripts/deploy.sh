@@ -27,11 +27,11 @@ echo "[1/7] Create release dir"
 # 1. Create the timestamped directory. -p ensures parent folders exist and no error if it exists.
 sudo mkdir -p "$RELEASE_DIR"
 
-# 2. Set the owner to the 'fastAPI' user so the app has permission to write logs/files.
-sudo chown fastAPI "$RELEASE_DIR"
+# 2. Set the owner to the 'fastapi' user so the app has permission to write logs/files.
+sudo chown fastapi "$RELEASE_DIR"
 
-# 3. Set the group to 'fastAPI'.
-sudo chgrp fastAPI "$RELEASE_DIR"
+# 3. Set the group to 'fastapi'.
+sudo chgrp fastapi "$RELEASE_DIR"
 
 echo "[2/7] Sync code into release"
 # Copy files from current directory (./) to the new release directory.
@@ -40,14 +40,14 @@ echo "[2/7] Sync code into release"
 sudo rsync -a --delete ./ "$RELEASE_DIR/"
 
 # Ensure that ALL copied files (recursively with -R) belong to the application user.
-sudo chown -R fastAPI:fastAPI "$RELEASE_DIR"
+sudo chown -R fastapi:fastapi "$RELEASE_DIR"
 
 echo "[3/7] Create venv + install deps from uv.lock"
-# Run the installation as the 'fastAPI' user (security best practice).
+# Run the installation as the 'fastapi' user (security best practice).
 # bash -lc: Start a 'login' shell so it loads ~/.bashrc (paths, env vars).
 # Use 'uv' to sync dependencies based EXACTLY on uv.lock.
 # --locked: Fail if the lockfile is out of date (prevents accidental upgrades).
-sudo -u fastAPI bash -lc "
+sudo -u fastapi bash -lc "
   
   cd '$RELEASE_DIR'
   

@@ -4,12 +4,12 @@ Requires=fastAPI-unix.socket
 After=fastAPI-unix.socket
 
 [Service]
-Type=notify
-WatchdogSec=10
-User=fastAPI
-Group=fastAPI
+Type=simple
+User=fastapi
+Group=fastapi
 WorkingDirectory=/opt/fastAPI/current
 EnvironmentFile=/etc/fastAPI/fastAPI.env
+Environment=PYTHONDONTWRITEBYTECODE=1
 
 # Use the uv-managed venv inside the deployed release
 ExecStart=/opt/fastAPI/current/.venv/bin/gunicorn \
