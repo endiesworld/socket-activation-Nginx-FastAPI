@@ -100,6 +100,7 @@ Deployment is release-based:
 
 - Code syncs to: `/opt/fastAPI/releases/<timestamp>/`
 - Symlink flips to: `/opt/fastAPI/current -> /opt/fastAPI/releases/<timestamp>/`
+- Deploy restarts the socket and triggers startup via a local `/health` request (socket activation).
 
 ### Phase 4: Verify (run anywhere)
 
