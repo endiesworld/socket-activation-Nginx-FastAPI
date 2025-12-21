@@ -104,7 +104,7 @@ Provisioning installs/creates:
 - nginx vhost (if enabled): `/etc/nginx/conf.d/fastAPI.conf`
 
 ### Activity diagram for the Provisioning script. 
-![Activity-diagram](#) ![./Assets/Activity-diagram-provisioning.png](https://github.com/endiesworld/socket-activation-Nginx-FastAPI/tree/main/Assets/Activity-diagram-provisioning.png)
+![Activity-diagram](#) ![./Assets/Activity-diagram-provisioning.png](https://github.com/endiesworld/socket-activation-Nginx-FastAPI/blob/main/Assets/Activity-diagram-provisioning.png)
 
 ### Phase 3: Deploy the application (repeatable, run from the repo root)
 
