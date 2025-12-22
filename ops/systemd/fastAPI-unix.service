@@ -16,7 +16,7 @@ Environment=PYTHONDONTWRITEBYTECODE=1
 ExecStart=/var/lib/fastAPI/current-venv/bin/python -m gunicorn \
   -k uvicorn.workers.UvicornWorker \
   --workers 2 \
-  --bind fd:// \
+  --bind fd://3 \
   --access-logfile - \
   --error-logfile - \
   app.main:app
