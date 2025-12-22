@@ -107,6 +107,12 @@ Via Unix socket (also triggers service start if needed):
 sudo curl --unix-socket /run/fastAPI/fastAPI.sock -fsS http://localhost/health
 ```
 
+If you want to run `curl` without `sudo`, add your user to the socket group (default: `http`) and re-login:
+
+```bash
+sudo usermod -aG http "$USER"
+```
+
 Check status/logs:
 
 ```bash
@@ -120,6 +126,13 @@ Via nginx (if you provisioned with `--with-nginx`):
 ```bash
 curl -fsS http://127.0.0.1/health
 ```
+
+From another machine (public access), use your server IP or DNS name:
+
+- `http://<server-ip>/health`
+- `http://your-domain.example/health`
+
+If it works locally but not remotely, ensure port `80/tcp` is reachable (cloud security group / firewall / router).
 
 ---
 
