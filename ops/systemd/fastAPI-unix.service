@@ -7,22 +7,21 @@ After=fastAPI-unix.socket
 Type=simple
 User=fastapi
 Group=fastapi
-Sockets=fastAPI-unix.socket
 WorkingDirectory=/opt/fastAPI/current
 EnvironmentFile=/etc/fastAPI/fastAPI.env
 Environment=PYTHONDONTWRITEBYTECODE=1
+
+# Require systemd socket activation (the socket unit must start this service).
+ExecStartPre=/bin/sh -c 'if [ "${LISTEN_FDS:-0}" -lt 1 ]; then echo "ERROR: socket activation required (LISTEN_FDS not set). Start fastAPI-unix.socket and connect to it." >&2; exit 1; fi'
 
 # Use a venv outside /opt (some systems mount /opt with noexec)
 ExecStart=/var/lib/fastAPI/current-venv/bin/python -m gunicorn \
   -k uvicorn.workers.UvicornWorker \
   --workers 2 \
-  --bind fd://3 \
   --access-logfile - \
   --error-logfile - \
   app.main:app
 
-Restart=on-failure
-RestartSec=2
 TimeoutStartSec=30
 TimeoutStopSec=30
 
