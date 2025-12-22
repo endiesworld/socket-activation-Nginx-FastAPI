@@ -65,6 +65,8 @@ From your source checkout on the server (example: `/srv/fastapi-src/socket-activ
 sudo bash ops/scripts/provisioning.sh --with-nginx
 ```
 
+Note: run scripts via `bash` (no `chmod +x` needed). Changing execute bits on tracked files can make `git pull` fail with “local changes would be overwritten”.
+
 Without nginx:
 
 ```bash
@@ -77,7 +79,7 @@ Provisioning installs/creates:
 - systemd units: `/etc/systemd/system/fastAPI-unix.{socket,service}`
 - tmpfiles rule: `/etc/tmpfiles.d/fastAPI.conf` (creates `/run/fastAPI` on boot)
 - env file: `/etc/fastAPI/fastAPI.env`
-- nginx vhost (if enabled): `/etc/nginx/conf.d/fastAPI.conf`
+- nginx vhost (if enabled): installed into nginx’s included snippets dir (commonly `/etc/nginx/http.d/00-fastAPI.conf` on Arch)
 - venv base: `/var/lib/fastAPI` (per-release venvs under `/var/lib/fastAPI/venvs/`)
 
 ### Activity diagram for the Provisioning script. 
@@ -137,7 +139,7 @@ If it works locally but not remotely, ensure port `80/tcp` is reachable (cloud s
 If `/health` works over the Unix socket but nginx returns `404`, verify nginx is loading the intended vhost and reload:
 
 ```bash
-sudo nginx -T | grep -n "conf.d/fastAPI.conf"
+sudo nginx -T | grep -nE "/etc/nginx/(http\\.d|conf\\.d)/00-fastAPI\\.conf|fastapi_upstream|/run/fastAPI/fastAPI\\.sock"
 sudo nginx -t
 sudo systemctl reload nginx
 ```

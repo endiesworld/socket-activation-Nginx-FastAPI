@@ -50,7 +50,8 @@ What it does (one-time provisioning):
   - Enables socket activation:
       systemctl enable --now fastAPI-unix.socket
   - Optional nginx integration:
-      /etc/nginx/conf.d/fastAPI.conf
+      Installs a vhost snippet into the directory that your nginx config includes
+      (commonly /etc/nginx/http.d on Arch, sometimes /etc/nginx/conf.d).
       systemctl enable --now nginx
 
 Notes:
@@ -174,6 +175,37 @@ if ! is_arch_linux; then
   log "WARN: this script is written for Arch Linux; continuing anyway."
 fi
 
+detect_nginx_snippets_dir() {
+  # Determine where nginx loads per-site snippets from.
+  #
+  # On Arch, /etc/nginx/nginx.conf typically contains:
+  #   include /etc/nginx/http.d/*.conf;
+  #
+  # Other distros may use:
+  #   include /etc/nginx/conf.d/*.conf;
+  #
+  # We only inspect /etc/nginx/nginx.conf here (not nginx -T) so this works even
+  # before nginx is enabled.
+  local conf="/etc/nginx/nginx.conf"
+  local cleaned
+  cleaned="$(sed -E 's/#.*$//' "$conf" 2>/dev/null || true)"
+
+  if grep -Eq '^[[:space:]]*include[[:space:]]+/etc/nginx/http\.d/\*\.conf[[:space:]]*;' <<<"$cleaned"; then
+    printf '%s\n' "/etc/nginx/http.d"
+    return 0
+  fi
+  if grep -Eq '^[[:space:]]*include[[:space:]]+/etc/nginx/conf\.d/\*\.conf[[:space:]]*;' <<<"$cleaned"; then
+    printf '%s\n' "/etc/nginx/conf.d"
+    return 0
+  fi
+
+  if [[ -d /etc/nginx/http.d ]]; then
+    printf '%s\n' "/etc/nginx/http.d"
+  else
+    printf '%s\n' "/etc/nginx/conf.d"
+  fi
+}
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 
@@ -255,8 +287,11 @@ run systemctl enable --now "$UNIT_SOCKET"
 log "[7/8] Optional nginx integration"
 if [[ "$WITH_NGINX" == "1" ]]; then
   require_cmd nginx
-  ensure_dir /etc/nginx/conf.d 0755
-  install_file "$NGINX_SRC" "/etc/nginx/conf.d/$APP_NAME.conf" 0644
+  NGINX_SNIPPETS_DIR="$(detect_nginx_snippets_dir)"
+  ensure_dir "$NGINX_SNIPPETS_DIR" 0755
+  # Install with a "00-" prefix to make it the default vhost on setups that
+  # don't explicitly configure a default_server (common on minimal hosts).
+  install_file "$NGINX_SRC" "$NGINX_SNIPPETS_DIR/00-$APP_NAME.conf" 0644
   run nginx -t
   run systemctl enable --now nginx
   run systemctl reload nginx
@@ -266,4 +301,4 @@ fi
 
 log "[8/8] Done"
 log "Next: deploy code from your repo checkout:"
-log "  sudo ops/scripts/deploy.sh"
+log "  sudo bash ops/scripts/deploy.sh"
