@@ -92,7 +92,7 @@ sudo -u fastapi bash -lc "
   cd '$RELEASE_DIR'
 
   uv venv --allow-existing '$VENV_RELEASE_DIR'
-  uv export --frozen --locked --no-dev --no-emit-project --format requirements.txt --output-file .requirements.txt
+  uv export --frozen --no-dev --no-emit-project --format requirements.txt --output-file .requirements.txt
   uv pip sync -p '$VENV_RELEASE_DIR/bin/python' .requirements.txt
 "
 
