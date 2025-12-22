@@ -5,6 +5,30 @@ set -euo pipefail
 
 APP_NAME="fastAPI"
 BASE="/opt/fastAPI"
+TMPFILES_CONF="/etc/tmpfiles.d/fastAPI.conf"
+
+SOCKET_UNIT_FILE="/etc/systemd/system/fastAPI-unix.socket"
+FALLBACK_SOCKET_PATH="/run/fastAPI/fastAPI.sock"
+FALLBACK_SOCKET_USER="fastapi"
+FALLBACK_SOCKET_GROUP="http"
+
+get_systemd_value() {
+  local file="$1"
+  local key="$2"
+  awk -F= -v k="$key" '$1==k {print $2}' "$file" | tail -n 1
+}
+
+SOCKET_PATH="$FALLBACK_SOCKET_PATH"
+SOCKET_USER="$FALLBACK_SOCKET_USER"
+SOCKET_GROUP="$FALLBACK_SOCKET_GROUP"
+
+if [[ -f "$SOCKET_UNIT_FILE" ]]; then
+  SOCKET_PATH="$(get_systemd_value "$SOCKET_UNIT_FILE" "ListenStream")"
+  SOCKET_USER="$(get_systemd_value "$SOCKET_UNIT_FILE" "SocketUser")"
+  SOCKET_GROUP="$(get_systemd_value "$SOCKET_UNIT_FILE" "SocketGroup")"
+fi
+
+SOCKET_DIR="$(dirname "$SOCKET_PATH")"
 
 # Generates a unique ID based on the current time (UTC).
 # This creates a unique folder for every single deployment history.
@@ -69,6 +93,15 @@ echo "[5/7] Restart via socket activation"
 #  2) restart the socket listener
 #  3) perform a request that triggers systemd to start the service
 sudo systemctl stop "$UNIT_SERVICE" || true
+
+# Ensure the socket runtime directory exists (it is tmpfs and may be missing after reboot).
+# Prefer tmpfiles.d if present; otherwise create it based on the installed socket unit config.
+if [[ -f "$TMPFILES_CONF" ]]; then
+  sudo systemd-tmpfiles --create "$TMPFILES_CONF"
+else
+  sudo install -d -m 0750 -o "$SOCKET_USER" -g "$SOCKET_GROUP" "$SOCKET_DIR"
+fi
+
 sudo systemctl restart "$UNIT_SOCKET"
 
 echo "[6/7] Smoke test"
@@ -77,6 +110,29 @@ echo "[6/7] Smoke test"
 # -s: Silent mode (no progress bar).
 # -S: Show errors if -f triggers.
 # Add a timeout so deployments don't hang forever if the service fails to come up.
-curl --max-time 10 --unix-socket /run/fastAPI/fastAPI.sock -fsS http://localhost/health >/dev/null
+for _ in {1..50}; do
+  if sudo systemctl is-active --quiet "$UNIT_SOCKET" && [[ -S "$SOCKET_PATH" ]]; then
+    break
+  fi
+  sleep 0.1
+done
+
+if ! curl --max-time 10 --unix-socket "$SOCKET_PATH" -fsS http://localhost/health >/dev/null; then
+  echo "ERROR: smoke test failed (cannot connect to $SOCKET_PATH)."
+  echo
+  echo "Debug info:"
+  echo "- Socket: $UNIT_SOCKET"
+  echo "- Service: $UNIT_SERVICE"
+  echo "- Socket path: $SOCKET_PATH"
+  echo "- Socket dir: $SOCKET_DIR ($SOCKET_USER:$SOCKET_GROUP)"
+  echo "- Tmpfiles: $TMPFILES_CONF"
+  echo
+  sudo ls -la "$SOCKET_DIR" || true
+  sudo ls -la "$SOCKET_PATH" || true
+  sudo systemctl status "$UNIT_SOCKET" --no-pager -l || true
+  sudo systemctl status "$UNIT_SERVICE" --no-pager -l || true
+  sudo journalctl -u "$UNIT_SERVICE" -n 200 --no-pager || true
+  exit 1
+fi
 
 echo "[7/7] Done: $RELEASE_ID"

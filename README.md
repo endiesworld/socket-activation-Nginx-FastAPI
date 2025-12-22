@@ -66,14 +66,13 @@ cd socket-activation-Nginx-FastAPI
 From your source checkout on the server (example: `/srv/fastapi-src/socket-activation-Nginx-FastAPI`), run:
 
 ```bash
-chmod +x ops/scripts/provisioning.sh
-sudo ops/scripts/provisioning.sh --with-nginx
+sudo bash ops/scripts/provisioning.sh --with-nginx
 ```
 
 Without nginx:
 
 ```bash
-sudo ops/scripts/provisioning.sh
+sudo bash ops/scripts/provisioning.sh
 ```
 
 Provisioning installs/creates:
@@ -92,8 +91,7 @@ Provisioning installs/creates:
 From the same repo root on the server (example: `/srv/fastapi-src/socket-activation-Nginx-FastAPI`):
 
 ```bash
-chmod +x ops/scripts/deploy.sh
-sudo ops/scripts/deploy.sh
+sudo bash ops/scripts/deploy.sh
 ```
 
 Deployment is release-based:
@@ -131,9 +129,14 @@ curl -fsS http://127.0.0.1/health
 From your source checkout on the server (example: `/srv/fastapi-src/socket-activation-Nginx-FastAPI`), pull and redeploy:
 
 ```bash
-git pull
+git pull --rebase --autostash
 sudo ops/scripts/deploy.sh
 ```
+
+If `git pull` aborts with “Your local changes would be overwritten”, you have modified tracked files (for example, `ops/scripts/deploy.sh`). Either:
+
+- Keep your changes: `git stash push -m "local changes" && git pull --rebase && git stash pop`
+- Discard your changes: `git restore --source=HEAD --worktree --staged ops/scripts/deploy.sh` (or `git reset --hard HEAD`) then `git pull`
 
 Each deploy creates a new directory under `/opt/fastAPI/releases/` and repoints `/opt/fastAPI/current` to it.
 
@@ -151,6 +154,32 @@ There is no automated rollback script yet (`ops/scripts/rollback.sh` is empty). 
 ls -1 /opt/fastAPI/releases
 sudo ln -sfn /opt/fastAPI/releases/<RELEASE_ID> /opt/fastAPI/current
 sudo systemctl restart fastAPI-unix.service
+```
+
+## Troubleshooting
+
+### `curl --unix-socket ...` fails with “Could not connect to server”
+
+Run these on the server:
+
+```bash
+sudo systemctl status fastAPI-unix.socket --no-pager -l
+sudo systemctl status fastAPI-unix.service --no-pager -l
+sudo journalctl -u fastAPI-unix.service -n 200 --no-pager
+```
+
+Common cause: the runtime dir under `/run` is missing after reboot (it’s a tmpfs). Fix:
+
+```bash
+sudo systemd-tmpfiles --create /etc/tmpfiles.d/fastAPI.conf
+sudo systemctl restart fastAPI-unix.socket
+```
+
+If `/etc/tmpfiles.d/fastAPI.conf` does not exist, re-run provisioning:
+
+```bash
+cd /srv/fastapi-src/socket-activation-Nginx-FastAPI
+sudo bash ops/scripts/provisioning.sh --with-nginx
 ```
 
 ## Layout
