@@ -8,6 +8,7 @@ set -euo pipefail
 # - Install systemd units (socket-activated Gunicorn/Uvicorn)
 # - Install tmpfiles.d rule to create /run/fastAPI on boot
 # - (Optional) Install nginx reverse proxy config and enable nginx
+# - Prepare a venv base directory under /var/lib/fastAPI (used by deploy.sh)
 #
 # This script is intended to be idempotent and safe to re-run.
 #
@@ -21,6 +22,7 @@ APP_NAME="fastAPI"
 APP_USER="fastapi"
 APP_GROUP="fastapi"
 BASE_DIR="/opt/fastAPI"
+VENV_BASE_DIR="/var/lib/fastAPI"
 ENV_DIR="/etc/fastAPI"
 ENV_FILE="/etc/fastAPI/fastAPI.env"
 
@@ -39,6 +41,7 @@ Usage:
 What it does (one-time provisioning):
   - Creates user/group: fastapi
   - Creates /opt/fastAPI and /etc/fastAPI
+  - Creates /var/lib/fastAPI (venv base)
   - Installs systemd units:
       /etc/systemd/system/fastAPI-unix.socket
       /etc/systemd/system/fastAPI-unix.service
@@ -196,6 +199,9 @@ log "[2/8] Create base directories"
 ensure_dir "$BASE_DIR" 0755
 ensure_dir "$BASE_DIR/releases" 0755
 ensure_dir "$ENV_DIR" 0755
+ensure_dir "$VENV_BASE_DIR" 0755
+ensure_dir "$VENV_BASE_DIR/venvs" 0755
+run chown -R "$APP_USER":"$APP_GROUP" "$VENV_BASE_DIR"
 
 log "[3/8] Ensure environment file exists"
 if [[ ! -f "$ENV_FILE" ]]; then

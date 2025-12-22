@@ -7,7 +7,16 @@ APP_NAME="fastAPI"
 BASE="/opt/fastAPI"
 TMPFILES_CONF="/etc/tmpfiles.d/fastAPI.conf"
 
-SOCKET_UNIT_FILE="/etc/systemd/system/fastAPI-unix.socket"
+VENV_BASE="/var/lib/fastAPI"
+VENV_CURRENT="$VENV_BASE/current-venv"
+
+# --- SERVICE DEFINITIONS ---
+# "${VAR:-default}" syntax means: If UNIT_SOCKET is passed in via environment, use it.
+# Otherwise, default to 'fastAPI-unix.socket'.
+UNIT_SOCKET="${UNIT_SOCKET:-fastAPI-unix.socket}"
+UNIT_SERVICE="${UNIT_SERVICE:-fastAPI-unix.service}"
+
+SOCKET_UNIT_FILE="/etc/systemd/system/$UNIT_SOCKET"
 FALLBACK_SOCKET_PATH="/run/fastAPI/fastAPI.sock"
 FALLBACK_SOCKET_USER="fastapi"
 FALLBACK_SOCKET_GROUP="http"
@@ -30,22 +39,28 @@ fi
 
 SOCKET_DIR="$(dirname "$SOCKET_PATH")"
 
+# Guardrail: this deploy script expects the systemd unit to use the shared venv under /var/lib/fastAPI.
+# If the installed unit still points at /opt/fastAPI/current/.venv, deployments will succeed but the service
+# will fail to start with status=203/EXEC on systems with /opt mounted noexec.
+SERVICE_UNIT_FILE="/etc/systemd/system/$UNIT_SERVICE"
+if [[ -f "$SERVICE_UNIT_FILE" ]] && grep -q "/opt/fastAPI/current/.venv" "$SERVICE_UNIT_FILE"; then
+  echo "ERROR: $SERVICE_UNIT_FILE still references /opt/fastAPI/current/.venv."
+  echo "Fix: re-run provisioning to install the updated unit, then redeploy:"
+  echo "  sudo bash ops/scripts/provisioning.sh --with-nginx"
+  exit 2
+fi
+
 # Generates a unique ID based on the current time (UTC).
 # This creates a unique folder for every single deployment history.
 RELEASE_ID="$(date -u +%Y%m%d%H%M%S)"
 
 # The full path where THIS specific version of the code will live.
 RELEASE_DIR="$BASE/releases/$RELEASE_ID"
+VENV_RELEASE_DIR="$VENV_BASE/venvs/$RELEASE_ID"
 
 # The "Pointer" path. The live web server will always look at this path.
 # We will point this symlink to the new RELEASE_DIR at the very end.
 CURRENT="$BASE/current"
-
-# --- SERVICE DEFINITIONS ---
-# "${VAR:-default}" syntax means: If UNIT_SOCKET is passed in via environment, use it.
-# Otherwise, default to 'fastAPI-unix.socket'.
-UNIT_SOCKET="${UNIT_SOCKET:-fastAPI-unix.socket}" 
-UNIT_SERVICE="${UNIT_SERVICE:-fastAPI-unix.service}"
 
 echo "[1/7] Create release dir"
 # 1. Create the timestamped directory. -p ensures parent folders exist and no error if it exists.
@@ -68,14 +83,17 @@ sudo chown -R fastapi:fastapi "$RELEASE_DIR"
 
 echo "[3/7] Create venv + install deps from uv.lock"
 # Run the installation as the 'fastapi' user (security best practice).
-# bash -lc: Start a 'login' shell so it loads ~/.bashrc (paths, env vars).
-# Use 'uv' to sync dependencies based EXACTLY on uv.lock.
-# --locked: Fail if the lockfile is out of date (prevents accidental upgrades).
+# We create the venv under /var/lib (not /opt) so ExecStart won't fail on systems with /opt mounted noexec.
+sudo mkdir -p "$VENV_RELEASE_DIR"
+sudo chown -R fastapi:fastapi "$VENV_BASE"
+
 sudo -u fastapi bash -lc "
-  
+  set -euo pipefail
   cd '$RELEASE_DIR'
-  
-  uv sync --locked
+
+  uv venv --allow-existing '$VENV_RELEASE_DIR'
+  uv export --frozen --locked --no-dev --no-emit-project --format requirements.txt --output-file .requirements.txt
+  uv pip sync -p '$VENV_RELEASE_DIR/bin/python' .requirements.txt
 "
 
 echo "[4/7] Flip current symlink"
@@ -85,6 +103,7 @@ echo "[4/7] Flip current symlink"
 # -n (no-dereference): Treat '$CURRENT' as a file, not a directory. 
 # Result: Instantly points /opt/fastAPI/current -> /opt/fastAPI/releases/2025...
 sudo ln -sfn "$RELEASE_DIR" "$CURRENT"
+sudo ln -sfn "$VENV_RELEASE_DIR" "$VENV_CURRENT"
 
 echo "[5/7] Restart via socket activation"
 # This service is configured to bind to an inherited systemd socket (gunicorn --bind fd://3).

@@ -43,10 +43,6 @@ sudo pacman -Syu
 sudo pacman -S --needed git python uv rsync curl nginx
 ```
 
-```bash
-sudo pacman -S --needed git python uv rsync curl nginx
-```
-
 Note: The Unix socket is group-owned by `http` so nginx can connect. If you provision without nginx, `ops/scripts/provisioning.sh` defaults the socket group to `fastapi`. Override with `--socket-group <group>`.
 
 ### Phase 1: Create a source checkout on the server (run as your normal user)
@@ -82,6 +78,7 @@ Provisioning installs/creates:
 - tmpfiles rule: `/etc/tmpfiles.d/fastAPI.conf` (creates `/run/fastAPI` on boot)
 - env file: `/etc/fastAPI/fastAPI.env`
 - nginx vhost (if enabled): `/etc/nginx/conf.d/fastAPI.conf`
+- venv base: `/var/lib/fastAPI` (per-release venvs under `/var/lib/fastAPI/venvs/`)
 
 ### Activity diagram for the Provisioning script. 
 ![Activity-diagram](#) ![./Assets/Activity-diagram-provisioning.png](https://github.com/endiesworld/socket-activation-Nginx-FastAPI/blob/main/Assets/Activity-diagram-provisioning.png)
@@ -98,6 +95,8 @@ Deployment is release-based:
 
 - Code syncs to: `/opt/fastAPI/releases/<timestamp>/`
 - Symlink flips to: `/opt/fastAPI/current -> /opt/fastAPI/releases/<timestamp>/`
+- Venv syncs to: `/var/lib/fastAPI/venvs/<timestamp>/`
+- Venv symlink flips to: `/var/lib/fastAPI/current-venv -> /var/lib/fastAPI/venvs/<timestamp>/`
 - Deploy restarts the socket and triggers startup via a local `/health` request (socket activation).
 
 ### Phase 4: Verify (run anywhere)
@@ -130,7 +129,13 @@ From your source checkout on the server (example: `/srv/fastapi-src/socket-activ
 
 ```bash
 git pull --rebase --autostash
-sudo ops/scripts/deploy.sh
+sudo bash ops/scripts/deploy.sh
+```
+
+If you pulled changes that touch `ops/systemd/` or `ops/nginx/`, re-run provisioning (safe/idempotent) to install the updated unit/config files:
+
+```bash
+sudo bash ops/scripts/provisioning.sh --with-nginx
 ```
 
 If `git pull` aborts with “Your local changes would be overwritten”, you have modified tracked files (for example, `ops/scripts/deploy.sh`). Either:

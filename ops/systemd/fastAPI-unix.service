@@ -11,8 +11,8 @@ WorkingDirectory=/opt/fastAPI/current
 EnvironmentFile=/etc/fastAPI/fastAPI.env
 Environment=PYTHONDONTWRITEBYTECODE=1
 
-# Use the uv-managed venv inside the deployed release
-ExecStart=/opt/fastAPI/current/.venv/bin/gunicorn \
+# Use a venv outside /opt (some systems mount /opt with noexec)
+ExecStart=/var/lib/fastAPI/current-venv/bin/python -m gunicorn \
   -k uvicorn.workers.UvicornWorker \
   --workers 2 \
   --bind fd://3 \
