@@ -103,6 +103,11 @@ sudo -u fastapi bash -lc "
   uv pip sync -p '$VENV_RELEASE_DIR/bin/python' .requirements.txt
 "
 
+# Some venv implementations may not create a `bin/python` shim; ensure it exists.
+if [[ ! -e "$VENV_RELEASE_DIR/bin/python" ]] && [[ -e "$VENV_RELEASE_DIR/bin/python3" ]]; then
+  sudo ln -sfn python3 "$VENV_RELEASE_DIR/bin/python"
+fi
+
 echo "[4/7] Flip current symlink"
 # This is the "Atomic Switch". 
 # ln -s: Create a symbolic link.
@@ -133,6 +138,7 @@ if [[ ! -x "$VENV_CURRENT/bin/python" ]]; then
   sudo ls -la "$VENV_BASE" || true
   sudo ls -la "$VENV_CURRENT" || true
   sudo ls -la "$VENV_RELEASE_DIR" || true
+  sudo ls -la "$VENV_RELEASE_DIR/bin" || true
   exit 1
 fi
 
@@ -160,9 +166,15 @@ if ! curl --max-time 10 --unix-socket "$SOCKET_PATH" -fsS http://localhost/healt
   echo "- Socket path: $SOCKET_PATH"
   echo "- Socket dir: $SOCKET_DIR ($SOCKET_USER:$SOCKET_GROUP)"
   echo "- Tmpfiles: $TMPFILES_CONF"
+  echo "- Venv current: $VENV_CURRENT"
+  echo "- Venv release: $VENV_RELEASE_DIR"
   echo
   sudo ls -la "$SOCKET_DIR" || true
   sudo ls -la "$SOCKET_PATH" || true
+  sudo ls -la "$VENV_BASE" || true
+  sudo ls -la "$VENV_CURRENT" || true
+  sudo ls -la "$VENV_RELEASE_DIR" || true
+  sudo ls -la "$VENV_RELEASE_DIR/bin" || true
   sudo systemctl status "$UNIT_SOCKET" --no-pager -l || true
   sudo systemctl status "$UNIT_SERVICE" --no-pager -l || true
   sudo journalctl -u "$UNIT_SERVICE" -n 200 --no-pager || true

@@ -194,6 +194,8 @@ sudo systemctl reset-failed fastAPI-unix.socket fastAPI-unix.service
 sudo systemctl restart fastAPI-unix.socket
 ```
 
+If the service shows `status=203/EXEC` and “Unable to locate executable .../bin/python: No such file or directory”, re-run provisioning to install the latest unit file; this repo uses `ProtectHome=read-only` so the service can still access the Python interpreter used by the venv.
+
 ## Layout
 
 - `app/` – FastAPI application code
