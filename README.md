@@ -134,6 +134,14 @@ From another machine (public access), use your server IP or DNS name:
 
 If it works locally but not remotely, ensure port `80/tcp` is reachable (cloud security group / firewall / router).
 
+If `/health` works over the Unix socket but nginx returns `404`, verify nginx is loading the intended vhost and reload:
+
+```bash
+sudo nginx -T | grep -n "conf.d/fastAPI.conf"
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
 ---
 
 ## Updating (deploying a new version)
