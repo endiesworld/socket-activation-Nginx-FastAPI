@@ -196,7 +196,7 @@ sudo systemctl restart fastAPI-unix.socket
 
 If the service shows `status=203/EXEC` and “Unable to locate executable .../bin/python: No such file or directory”, re-run provisioning to install the latest unit file; this repo uses `ProtectHome=read-only` so the service can still access the Python interpreter used by the venv.
 
-If the service shows `OSError: [Errno 9] Bad file descriptor`, you are usually running Gunicorn with a duplicated socket fd in config. This repo’s systemd socket activation relies on Gunicorn’s built-in `LISTEN_FDS` support, so the service should be started by `fastAPI-unix.socket` (not by running the service directly).
+If the service shows `OSError: [Errno 9] Bad file descriptor`, it usually means Gunicorn tried to consume the inherited socket fd twice (common when both `--bind fd://3` and `LISTEN_FDS` activation are enabled at the same time). Re-run provisioning to install the current unit file, which binds explicitly to `fd://3` and disables `LISTEN_FDS` via `UnsetEnvironment=...`.
 
 ## Layout
 

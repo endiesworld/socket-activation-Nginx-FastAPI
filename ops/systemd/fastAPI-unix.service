@@ -11,16 +11,23 @@ WorkingDirectory=/opt/fastAPI/current
 EnvironmentFile=/etc/fastAPI/fastAPI.env
 Environment=PYTHONDONTWRITEBYTECODE=1
 
-# Require systemd socket activation (the socket unit must start this service).
-ExecStartPre=/bin/sh -c 'if [ "${LISTEN_FDS:-0}" -lt 1 ]; then echo "ERROR: socket activation required (LISTEN_FDS not set). Start fastAPI-unix.socket and connect to it." >&2; exit 1; fi'
+# Require systemd socket activation (fd 3 must be present).
+ExecStartPre=/bin/sh -c 'if [ ! -e /proc/self/fd/3 ]; then echo "ERROR: socket activation required (fd 3 missing). Start fastAPI-unix.socket and connect to it." >&2; exit 1; fi'
+
+# Gunicorn also supports systemd LISTEN_FDS, but we intentionally disable it to avoid
+# double-consuming the inherited fd (which can lead to EBADF). We bind explicitly to fd 3.
+UnsetEnvironment=LISTEN_PID LISTEN_FDS LISTEN_FDNAMES
 
 # Use a venv outside /opt (some systems mount /opt with noexec)
 ExecStart=/var/lib/fastAPI/current-venv/bin/python -m gunicorn \
   -k uvicorn.workers.UvicornWorker \
   --workers 2 \
+  --bind fd://3 \
   --access-logfile - \
   --error-logfile - \
   app.main:app
+
+Restart=no
 
 TimeoutStartSec=30
 TimeoutStopSec=30

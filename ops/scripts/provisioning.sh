@@ -249,6 +249,7 @@ install_file "$SYSTEMD_SERVICE_SRC" "/etc/systemd/system/$UNIT_SERVICE" 0644
 run systemctl daemon-reload
 
 log "[6/8] Enable socket activation"
+run systemctl reset-failed "$UNIT_SOCKET" "$UNIT_SERVICE"
 run systemctl enable --now "$UNIT_SOCKET"
 
 log "[7/8] Optional nginx integration"

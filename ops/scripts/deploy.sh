@@ -50,6 +50,13 @@ if [[ -f "$SERVICE_UNIT_FILE" ]] && grep -q "/opt/fastAPI/current/.venv" "$SERVI
   exit 2
 fi
 
+if [[ -f "$SERVICE_UNIT_FILE" ]] && grep -q -- "--bind fd://3" "$SERVICE_UNIT_FILE" && ! grep -q "^UnsetEnvironment=.*LISTEN_FDS" "$SERVICE_UNIT_FILE"; then
+  echo "ERROR: $SERVICE_UNIT_FILE binds to fd://3 but does not disable LISTEN_FDS."
+  echo "Fix: re-run provisioning to install the updated unit, then redeploy:"
+  echo "  sudo bash ops/scripts/provisioning.sh --with-nginx"
+  exit 2
+fi
+
 # Generates a unique ID based on the current time (UTC).
 # This creates a unique folder for every single deployment history.
 RELEASE_ID="$(date -u +%Y%m%d%H%M%S)"
