@@ -196,6 +196,8 @@ sudo systemctl restart fastAPI-unix.socket
 
 If the service shows `status=203/EXEC` and “Unable to locate executable .../bin/python: No such file or directory”, re-run provisioning to install the latest unit file; this repo uses `ProtectHome=read-only` so the service can still access the Python interpreter used by the venv.
 
+If the service shows `OSError: [Errno 9] Bad file descriptor`, ensure you’ve re-run provisioning after pulling: the service unit must include `Sockets=fastAPI-unix.socket` and use `--bind fd://` (not a hard-coded fd number).
+
 ## Layout
 
 - `app/` – FastAPI application code

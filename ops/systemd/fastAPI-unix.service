@@ -7,6 +7,7 @@ After=fastAPI-unix.socket
 Type=simple
 User=fastapi
 Group=fastapi
+Sockets=fastAPI-unix.socket
 WorkingDirectory=/opt/fastAPI/current
 EnvironmentFile=/etc/fastAPI/fastAPI.env
 Environment=PYTHONDONTWRITEBYTECODE=1
@@ -15,7 +16,7 @@ Environment=PYTHONDONTWRITEBYTECODE=1
 ExecStart=/var/lib/fastAPI/current-venv/bin/python -m gunicorn \
   -k uvicorn.workers.UvicornWorker \
   --workers 2 \
-  --bind fd://3 \
+  --bind fd:// \
   --access-logfile - \
   --error-logfile - \
   app.main:app
