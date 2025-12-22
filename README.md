@@ -187,6 +187,13 @@ cd /srv/fastapi-src/socket-activation-Nginx-FastAPI
 sudo bash ops/scripts/provisioning.sh --with-nginx
 ```
 
+If the units show `service-start-limit-hit`, clear the start-limit and retry:
+
+```bash
+sudo systemctl reset-failed fastAPI-unix.socket fastAPI-unix.service
+sudo systemctl restart fastAPI-unix.socket
+```
+
 ## Layout
 
 - `app/` – FastAPI application code

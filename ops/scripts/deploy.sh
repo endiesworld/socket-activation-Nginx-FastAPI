@@ -63,6 +63,13 @@ VENV_RELEASE_DIR="$VENV_BASE/venvs/$RELEASE_ID"
 CURRENT="$BASE/current"
 
 echo "[1/7] Create release dir"
+# Prevent the service from being triggered mid-deploy (e.g., by nginx) before the
+# new /opt/fastAPI/current and /var/lib/fastAPI/current-venv symlinks are flipped.
+echo "[0/7] Quiesce socket/service"
+sudo systemctl stop "$UNIT_SOCKET" || true
+sudo systemctl stop "$UNIT_SERVICE" || true
+sudo systemctl reset-failed "$UNIT_SOCKET" "$UNIT_SERVICE" || true
+
 # 1. Create the timestamped directory. -p ensures parent folders exist and no error if it exists.
 sudo mkdir -p "$RELEASE_DIR"
 
@@ -105,13 +112,12 @@ echo "[4/7] Flip current symlink"
 sudo ln -sfn "$RELEASE_DIR" "$CURRENT"
 sudo ln -sfn "$VENV_RELEASE_DIR" "$VENV_CURRENT"
 
-echo "[5/7] Restart via socket activation"
+echo "[5/7] Start via socket activation"
 # This service is configured to bind to an inherited systemd socket (gunicorn --bind fd://3).
 # Starting/restarting the service directly may fail (no FD 3 passed), so we:
-#  1) stop the running service (if any) so it will pick up the new /opt/fastAPI/current symlink
-#  2) restart the socket listener
+#  1) ensure the socket runtime directory exists
+#  2) start the socket listener
 #  3) perform a request that triggers systemd to start the service
-sudo systemctl stop "$UNIT_SERVICE" || true
 
 # Ensure the socket runtime directory exists (it is tmpfs and may be missing after reboot).
 # Prefer tmpfiles.d if present; otherwise create it based on the installed socket unit config.
@@ -121,7 +127,16 @@ else
   sudo install -d -m 0750 -o "$SOCKET_USER" -g "$SOCKET_GROUP" "$SOCKET_DIR"
 fi
 
-sudo systemctl restart "$UNIT_SOCKET"
+# Sanity check the venv before starting the socket.
+if [[ ! -x "$VENV_CURRENT/bin/python" ]]; then
+  echo "ERROR: venv python missing or not executable: $VENV_CURRENT/bin/python"
+  sudo ls -la "$VENV_BASE" || true
+  sudo ls -la "$VENV_CURRENT" || true
+  sudo ls -la "$VENV_RELEASE_DIR" || true
+  exit 1
+fi
+
+sudo systemctl start "$UNIT_SOCKET"
 
 echo "[6/7] Smoke test"
 # Check if the app is actually alive.
