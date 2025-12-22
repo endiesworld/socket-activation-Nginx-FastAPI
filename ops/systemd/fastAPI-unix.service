@@ -2,6 +2,7 @@
 Description=fastAPI API (Gunicorn/Uvicorn) - socket activated (Unix)
 Requires=fastAPI-unix.socket
 After=fastAPI-unix.socket
+RefuseManualStart=yes
 
 [Service]
 Type=simple
@@ -10,9 +11,6 @@ Group=fastapi
 WorkingDirectory=/opt/fastAPI/current
 EnvironmentFile=/etc/fastAPI/fastAPI.env
 Environment=PYTHONDONTWRITEBYTECODE=1
-
-# Require systemd socket activation (fd 3 must be present).
-ExecStartPre=/bin/sh -c 'if [ ! -e /proc/self/fd/3 ]; then echo "ERROR: socket activation required (fd 3 missing). Start fastAPI-unix.socket and connect to it." >&2; exit 1; fi'
 
 # Gunicorn also supports systemd LISTEN_FDS, but we intentionally disable it to avoid
 # double-consuming the inherited fd (which can lead to EBADF). We bind explicitly to fd 3.
