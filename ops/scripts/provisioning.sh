@@ -335,7 +335,14 @@ install_file "$SYSTEMD_SERVICE_SRC" "/etc/systemd/system/$UNIT_SERVICE" 0644
 run systemctl daemon-reload
 
 log "[6/8] Enable socket activation"
-run systemctl reset-failed "$UNIT_SOCKET" "$UNIT_SERVICE"
+# On a fresh install the units may not be loaded yet; `systemctl reset-failed UNIT...`
+# exits non-zero in that case, which would abort the script under `set -e`.
+if [[ "$DRY_RUN" == "1" ]]; then
+  log "[dry-run] systemctl reset-failed $UNIT_SOCKET $UNIT_SERVICE (ignored if not loaded)"
+else
+  log "+ systemctl reset-failed $UNIT_SOCKET $UNIT_SERVICE (ignored if not loaded)"
+  systemctl reset-failed "$UNIT_SOCKET" "$UNIT_SERVICE" || true
+fi
 run systemctl enable --now "$UNIT_SOCKET"
 
 log "[7/8] Optional nginx integration"
