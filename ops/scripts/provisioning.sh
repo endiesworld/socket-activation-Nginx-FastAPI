@@ -31,12 +31,13 @@ UNIT_SERVICE="fastAPI-unix.service"
 
 WITH_NGINX=0
 SOCKET_GROUP=""
+NGINX_SERVER_NAME=""
 DRY_RUN=0
 
 usage() {
   cat <<'EOF'
 Usage:
-  sudo ops/scripts/provisioning.sh [--with-nginx] [--socket-group GROUP] [--dry-run]
+  sudo ops/scripts/provisioning.sh [--with-nginx] [--nginx-server-name NAMES] [--socket-group GROUP] [--dry-run]
 
 What it does (one-time provisioning):
   - Creates user/group: fastapi
@@ -60,6 +61,7 @@ Notes:
 
 Options:
   --with-nginx   Install nginx vhost + enable nginx
+  --nginx-server-name Override the nginx `server_name` line (example: "example.com www.example.com")
   --socket-group Unix socket group ownership (defaults to 'http' with nginx, otherwise 'fastapi')
   --dry-run      Print actions without changing the system
   -h, --help     Show this help
@@ -131,6 +133,14 @@ while [[ $# -gt 0 ]]; do
     --with-nginx)
       WITH_NGINX=1
       shift
+      ;;
+    --nginx-server-name)
+      NGINX_SERVER_NAME="${2:-}"
+      if [[ -z "$NGINX_SERVER_NAME" ]]; then
+        log "ERROR: --nginx-server-name requires a value"
+        exit 2
+      fi
+      shift 2
       ;;
     --socket-group)
       SOCKET_GROUP="${2:-}"
@@ -399,7 +409,19 @@ if [[ "$WITH_NGINX" == "1" ]]; then
   run rm -f "$NGINX_SNIPPETS_DIR/$APP_NAME.conf" || true
   # Install with a "00-" prefix to make it the default vhost on setups that
   # don't explicitly configure a default_server (common on minimal hosts).
-  install_file "$NGINX_SRC" "$NGINX_SNIPPETS_DIR/00-$APP_NAME.conf" 0644
+  if [[ -n "$NGINX_SERVER_NAME" ]]; then
+    if [[ "$DRY_RUN" == "1" ]]; then
+      log "[dry-run] render nginx vhost: $NGINX_SRC (server_name=$NGINX_SERVER_NAME)"
+      install_file "$NGINX_SRC" "$NGINX_SNIPPETS_DIR/00-$APP_NAME.conf" 0644
+    else
+      NGINX_RENDERED="$(mktemp)"
+      sed -E "s/^([[:space:]]*server_name)[[:space:]]+.*;/\\1 ${NGINX_SERVER_NAME};/" "$NGINX_SRC" >"$NGINX_RENDERED"
+      install_file "$NGINX_RENDERED" "$NGINX_SNIPPETS_DIR/00-$APP_NAME.conf" 0644
+      rm -f "$NGINX_RENDERED"
+    fi
+  else
+    install_file "$NGINX_SRC" "$NGINX_SNIPPETS_DIR/00-$APP_NAME.conf" 0644
+  fi
   run nginx -t
   run systemctl enable --now nginx
   run systemctl reload nginx

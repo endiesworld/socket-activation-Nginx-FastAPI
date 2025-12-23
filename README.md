@@ -65,6 +65,12 @@ From your source checkout on the server (example: `/srv/fastapi-src/socket-activ
 sudo bash ops/scripts/provisioning.sh --with-nginx
 ```
 
+If you have a domain name and want nginx to only respond for it (recommended for multi-site hosts), pass `--nginx-server-name`:
+
+```bash
+sudo bash ops/scripts/provisioning.sh --with-nginx --nginx-server-name "example.com www.example.com"
+```
+
 Note: run scripts via `bash` (no `chmod +x` needed). Changing execute bits on tracked files can make `git pull` fail with “local changes would be overwritten”.
 
 Without nginx:
@@ -135,6 +141,18 @@ From another machine (public access), use your server IP or DNS name:
 - `http://your-domain.example/health`
 
 If it works locally but not remotely, ensure port `80/tcp` is reachable (cloud security group / firewall / router).
+
+#### Fresh install verification checklist
+
+Run these on the server after provisioning + first deploy:
+
+```bash
+sudo systemctl is-enabled --quiet fastAPI-unix.socket && echo "socket enabled"
+sudo systemctl is-active  --quiet fastAPI-unix.socket && echo "socket active"
+sudo nginx -t
+sudo curl --unix-socket /run/fastAPI/fastAPI.sock -fsS http://localhost/health
+curl -fsS http://127.0.0.1/health
+```
 
 If `/health` works over the Unix socket but nginx returns `404`, verify nginx is loading the intended vhost and reload:
 
@@ -225,6 +243,18 @@ sudo systemctl restart fastAPI-unix.socket
 If the service shows `status=203/EXEC` and “Unable to locate executable .../bin/python: No such file or directory”, re-run provisioning to install the latest unit file; this repo uses `ProtectHome=read-only` so the service can still access the Python interpreter used by the venv.
 
 If the service shows `OSError: [Errno 9] Bad file descriptor`, it usually means Gunicorn tried to consume the inherited socket fd twice (common when both `--bind fd://3` and `LISTEN_FDS` activation are enabled at the same time). Re-run provisioning to install the current unit file, which binds explicitly to `fd://3` and disables `LISTEN_FDS` via `UnsetEnvironment=...`. Also note the service is configured with `RefuseManualStart=yes`—start the socket (`fastAPI-unix.socket`) and connect to it.
+
+## Teardown (start fresh)
+
+To remove what provisioning/deploy installed (useful for re-testing a “fresh install”), run from the repo root:
+
+```bash
+sudo bash ops/scripts/teardown.sh --with-nginx --purge --remove-user
+```
+
+Notes:
+- Teardown does not uninstall system packages.
+- If you host other sites in nginx using `conf.d`/`http.d`, don’t use `--with-nginx` unless you’re sure it’s safe.
 
 ## Layout
 
