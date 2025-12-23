@@ -139,6 +139,7 @@ If it works locally but not remotely, ensure port `80/tcp` is reachable (cloud s
 If `/health` works over the Unix socket but nginx returns `404`, verify nginx is loading the intended vhost and reload:
 
 ```bash
+sudo grep -nE 'include\\s+(/etc/nginx/)?(http\\.d|conf\\.d)/\\*\\.conf' /etc/nginx/nginx.conf || true
 sudo nginx -T | grep -nE "/etc/nginx/(http\\.d|conf\\.d)/00-fastAPI\\.conf|fastapi_upstream|/run/fastAPI/fastAPI\\.sock"
 sudo nginx -t
 sudo systemctl reload nginx

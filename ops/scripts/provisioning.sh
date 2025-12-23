@@ -206,6 +206,101 @@ detect_nginx_snippets_dir() {
   fi
 }
 
+nginx_conf_has_include() {
+  local conf="$1"
+  local include_line="$2"
+  local cleaned
+  cleaned="$(sed -E 's/#.*$//' "$conf" 2>/dev/null || true)"
+  grep -Fqx -- "$include_line" <<<"$cleaned"
+}
+
+ensure_nginx_includes_dir() {
+  # Ensure /etc/nginx/nginx.conf loads per-site snippets from the given directory.
+  #
+  # If nginx.conf already includes it, do nothing.
+  # Otherwise, insert an `include <dir>/*.conf;` inside the `http { ... }` block.
+  local snippets_dir="$1"
+  local conf="/etc/nginx/nginx.conf"
+  local include_line="    include ${snippets_dir}/*.conf;"
+
+  if [[ ! -f "$conf" ]]; then
+    log "ERROR: nginx config not found: $conf"
+    exit 1
+  fi
+
+  if nginx_conf_has_include "$conf" "$include_line"; then
+    return 0
+  fi
+
+  log "nginx: adding include to $conf: ${include_line#????}"
+
+  if [[ "$DRY_RUN" == "1" ]]; then
+    return 0
+  fi
+
+  local tmp backup
+  tmp="$(mktemp)"
+  backup="${conf}.bak.fastapi"
+  cp -a "$conf" "$backup"
+
+  # Insert before the closing brace of the `http {}` block, tracking nesting depth.
+  awk -v inc="$include_line" '
+    function strip_comments(s) { sub(/#.*/, "", s); return s }
+    function count_char(s, c,  i, n) { n=0; for (i=1;i<=length(s);i++) if (substr(s,i,1)==c) n++; return n }
+    BEGIN { in_http=0; pending_http=0; depth=0; inserted=0 }
+    {
+      raw=$0
+      line=strip_comments(raw)
+
+      if (!in_http) {
+        if (line ~ /^[[:space:]]*http[[:space:]]*\\{/) {
+          in_http=1
+          depth = count_char(line, "{") - count_char(line, "}")
+          print raw
+          next
+        }
+        if (line ~ /^[[:space:]]*http[[:space:]]*$/) {
+          pending_http=1
+          print raw
+          next
+        }
+        if (pending_http && line ~ /^[[:space:]]*\\{/) {
+          pending_http=0
+          in_http=1
+          depth = count_char(line, "{") - count_char(line, "}")
+          print raw
+          next
+        }
+
+        print raw
+        next
+      }
+
+      # We are inside http { ... }. Insert just before the brace that closes it.
+      opens = count_char(line, "{")
+      closes = count_char(line, "}")
+      if (!inserted && depth - closes + opens == 0 && closes > 0) {
+        print inc
+        inserted=1
+      }
+
+      print raw
+      depth += opens - closes
+      if (depth <= 0) { in_http=0 }
+    }
+    END {
+      if (!inserted) {
+        # Best-effort: append at end if we failed to locate the http block.
+        print ""
+        print inc
+      }
+    }
+  ' "$conf" >"$tmp"
+
+  install -m 0644 "$tmp" "$conf"
+  rm -f "$tmp"
+}
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 
@@ -288,6 +383,7 @@ log "[7/8] Optional nginx integration"
 if [[ "$WITH_NGINX" == "1" ]]; then
   require_cmd nginx
   NGINX_SNIPPETS_DIR="$(detect_nginx_snippets_dir)"
+  ensure_nginx_includes_dir "$NGINX_SNIPPETS_DIR"
   ensure_dir "$NGINX_SNIPPETS_DIR" 0755
   # Install with a "00-" prefix to make it the default vhost on setups that
   # don't explicitly configure a default_server (common on minimal hosts).
