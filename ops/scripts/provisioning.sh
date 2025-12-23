@@ -216,8 +216,8 @@ ensure_nginx_includes_dir() {
   local snippets_dir="$1"
   local conf="/etc/nginx/nginx.conf"
   local include_line="    include ${snippets_dir}/*.conf;"
-  local include_re
-  include_re="^[[:space:]]*include[[:space:]]+${snippets_dir//\//\\/}/\\*\\.conf[[:space:]]*;"
+  local include_abs="${snippets_dir}/*.conf"
+  local include_rel="${snippets_dir#/etc/nginx/}/*.conf"
 
   if [[ ! -f "$conf" ]]; then
     log "ERROR: nginx config not found: $conf"
@@ -225,9 +225,23 @@ ensure_nginx_includes_dir() {
   fi
 
   # Detect whether the include exists *inside* the http {} block.
-  if awk -v re="$include_re" '
+  if awk -v abs="$include_abs" -v rel="$include_rel" '
     function strip_comments(s) { sub(/#.*/, "", s); return s }
     function count_char(s, c,  i, n) { n=0; for (i=1;i<=length(s);i++) if (substr(s,i,1)==c) n++; return n }
+    function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+    function is_target_include(raw,   s, path) {
+      s = trim(strip_comments(raw))
+      if (s !~ /^include[ \t]+/) return 0
+      sub(/^include[ \t]+/, "", s)
+      s = trim(s)
+      sub(/[ \t]*;[ \t]*$/, "", s)
+      s = trim(s)
+      # Strip optional quotes.
+      if (s ~ /^".*"$/) { sub(/^"/, "", s); sub(/"$/, "", s) }
+      if (s ~ /^'\''.*'\''$/) { sub(/^'\''/, "", s); sub(/'\''$/, "", s) }
+      path = s
+      return (path == abs || path == rel)
+    }
     BEGIN { in_http=0; pending_http=0; depth=0; found=0 }
     {
       line=strip_comments($0)
@@ -237,7 +251,7 @@ ensure_nginx_includes_dir() {
         if (pending_http && line ~ /^[[:space:]]*\\{/) { pending_http=0; in_http=1; depth = count_char(line, "{") - count_char(line, "}"); next }
         next
       }
-      if (line ~ re) { found=1; exit 0 }
+      if (is_target_include($0)) { found=1; exit 0 }
       depth += count_char(line, "{") - count_char(line, "}")
       if (depth <= 0) { in_http=0 }
     }
@@ -257,9 +271,22 @@ ensure_nginx_includes_dir() {
   backup="${conf}.bak.fastapi"
   cp -a "$conf" "$backup"
 
-  awk -v inc="$include_line" -v re="$include_re" '
+  awk -v inc="$include_line" -v abs="$include_abs" -v rel="$include_rel" '
     function strip_comments(s) { sub(/#.*/, "", s); return s }
     function count_char(s, c,  i, n) { n=0; for (i=1;i<=length(s);i++) if (substr(s,i,1)==c) n++; return n }
+    function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+    function is_target_include(raw,   s, path) {
+      s = trim(strip_comments(raw))
+      if (s !~ /^include[ \t]+/) return 0
+      sub(/^include[ \t]+/, "", s)
+      s = trim(s)
+      sub(/[ \t]*;[ \t]*$/, "", s)
+      s = trim(s)
+      if (s ~ /^".*"$/) { sub(/^"/, "", s); sub(/"$/, "", s) }
+      if (s ~ /^'\''.*'\''$/) { sub(/^'\''/, "", s); sub(/'\''$/, "", s) }
+      path = s
+      return (path == abs || path == rel)
+    }
     BEGIN { in_http=0; pending_http=0; depth=0; inserted=0; saw_http=0 }
     {
       raw=$0
@@ -267,7 +294,7 @@ ensure_nginx_includes_dir() {
 
       if (!in_http) {
         # Drop includes of this dir outside http {} (they cause "upstream/server not allowed here").
-        if (line ~ re) { next }
+        if (is_target_include(raw)) { next }
 
         if (line ~ /^[[:space:]]*http[[:space:]]*\\{/) {
           in_http=1
