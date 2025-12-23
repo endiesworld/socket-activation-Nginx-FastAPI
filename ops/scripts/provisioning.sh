@@ -206,33 +206,47 @@ detect_nginx_snippets_dir() {
   fi
 }
 
-nginx_conf_has_include() {
-  local conf="$1"
-  local include_line="$2"
-  local cleaned
-  cleaned="$(sed -E 's/#.*$//' "$conf" 2>/dev/null || true)"
-  grep -Fqx -- "$include_line" <<<"$cleaned"
-}
-
 ensure_nginx_includes_dir() {
   # Ensure /etc/nginx/nginx.conf loads per-site snippets from the given directory.
   #
-  # If nginx.conf already includes it, do nothing.
-  # Otherwise, insert an `include <dir>/*.conf;` inside the `http { ... }` block.
+  # If nginx.conf already includes it *inside the http {} block*, do nothing.
+  # Otherwise:
+  #  - remove any include of this dir outside of http {} (invalid for server/upstream snippets)
+  #  - insert an `include <dir>/*.conf;` immediately after the `http {` opening.
   local snippets_dir="$1"
   local conf="/etc/nginx/nginx.conf"
   local include_line="    include ${snippets_dir}/*.conf;"
+  local include_re
+  include_re="^[[:space:]]*include[[:space:]]+${snippets_dir//\//\\/}/\\*\\.conf[[:space:]]*;"
 
   if [[ ! -f "$conf" ]]; then
     log "ERROR: nginx config not found: $conf"
     exit 1
   fi
 
-  if nginx_conf_has_include "$conf" "$include_line"; then
+  # Detect whether the include exists *inside* the http {} block.
+  if awk -v re="$include_re" '
+    function strip_comments(s) { sub(/#.*/, "", s); return s }
+    function count_char(s, c,  i, n) { n=0; for (i=1;i<=length(s);i++) if (substr(s,i,1)==c) n++; return n }
+    BEGIN { in_http=0; pending_http=0; depth=0; found=0 }
+    {
+      line=strip_comments($0)
+      if (!in_http) {
+        if (line ~ /^[[:space:]]*http[[:space:]]*\\{/) { in_http=1; depth = count_char(line, "{") - count_char(line, "}"); next }
+        if (line ~ /^[[:space:]]*http[[:space:]]*$/) { pending_http=1; next }
+        if (pending_http && line ~ /^[[:space:]]*\\{/) { pending_http=0; in_http=1; depth = count_char(line, "{") - count_char(line, "}"); next }
+        next
+      }
+      if (line ~ re) { found=1; exit 0 }
+      depth += count_char(line, "{") - count_char(line, "}")
+      if (depth <= 0) { in_http=0 }
+    }
+    END { exit(found ? 0 : 1) }
+  ' "$conf"; then
     return 0
   fi
 
-  log "nginx: adding include to $conf: ${include_line#????}"
+  log "nginx: ensuring $conf includes snippets inside http {}: ${include_line#????}"
 
   if [[ "$DRY_RUN" == "1" ]]; then
     return 0
@@ -243,20 +257,24 @@ ensure_nginx_includes_dir() {
   backup="${conf}.bak.fastapi"
   cp -a "$conf" "$backup"
 
-  # Insert before the closing brace of the `http {}` block, tracking nesting depth.
-  awk -v inc="$include_line" '
+  awk -v inc="$include_line" -v re="$include_re" '
     function strip_comments(s) { sub(/#.*/, "", s); return s }
     function count_char(s, c,  i, n) { n=0; for (i=1;i<=length(s);i++) if (substr(s,i,1)==c) n++; return n }
-    BEGIN { in_http=0; pending_http=0; depth=0; inserted=0 }
+    BEGIN { in_http=0; pending_http=0; depth=0; inserted=0; saw_http=0 }
     {
       raw=$0
       line=strip_comments(raw)
 
       if (!in_http) {
+        # Drop includes of this dir outside http {} (they cause "upstream/server not allowed here").
+        if (line ~ re) { next }
+
         if (line ~ /^[[:space:]]*http[[:space:]]*\\{/) {
           in_http=1
+          saw_http=1
           depth = count_char(line, "{") - count_char(line, "}")
           print raw
+          if (!inserted) { print inc; inserted=1 }
           next
         }
         if (line ~ /^[[:space:]]*http[[:space:]]*$/) {
@@ -267,8 +285,10 @@ ensure_nginx_includes_dir() {
         if (pending_http && line ~ /^[[:space:]]*\\{/) {
           pending_http=0
           in_http=1
+          saw_http=1
           depth = count_char(line, "{") - count_char(line, "}")
           print raw
+          if (!inserted) { print inc; inserted=1 }
           next
         }
 
@@ -276,26 +296,32 @@ ensure_nginx_includes_dir() {
         next
       }
 
-      # We are inside http { ... }. Insert just before the brace that closes it.
-      opens = count_char(line, "{")
-      closes = count_char(line, "}")
-      if (!inserted && depth - closes + opens == 0 && closes > 0) {
-        print inc
-        inserted=1
-      }
-
       print raw
-      depth += opens - closes
+      depth += count_char(line, "{") - count_char(line, "}")
       if (depth <= 0) { in_http=0 }
     }
     END {
-      if (!inserted) {
-        # Best-effort: append at end if we failed to locate the http block.
-        print ""
-        print inc
+      if (!saw_http) {
+        exit 2
       }
     }
   ' "$conf" >"$tmp"
+
+  if ! awk 'END{exit 0}' "$tmp" >/dev/null 2>&1; then
+    rm -f "$tmp"
+    log "ERROR: failed to render updated nginx.conf"
+    exit 1
+  fi
+
+  # If we couldn't locate an http {} block, restore from backup and fail with guidance.
+  if ! grep -Eq '^[[:space:]]*http[[:space:]]*\\{' "$tmp"; then
+    rm -f "$tmp"
+    log "ERROR: could not locate an 'http { }' block in $conf to insert an include."
+    log "Restore backup: $backup"
+    log "Manual fix: add this line inside the http { } block:"
+    log "  ${include_line#????}"
+    exit 1
+  fi
 
   install -m 0644 "$tmp" "$conf"
   rm -f "$tmp"
