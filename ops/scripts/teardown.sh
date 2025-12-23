@@ -47,7 +47,7 @@ Usage:
   sudo bash ops/scripts/teardown.sh [--with-nginx] [--purge] [--remove-user] [--restore-nginx-conf] [--dry-run]
 
 Options:
-  --with-nginx           Remove nginx snippet and undo nginx.conf include changes
+  --with-nginx           Remove nginx snippet and project-managed nginx config (if installed)
   --purge                Also remove /opt/fastAPI, /var/lib/fastAPI and /etc/fastAPI
   --remove-user          Also remove system user/group 'fastapi' (implies --purge is recommended)
   --restore-nginx-conf   Restore /etc/nginx/nginx.conf from /etc/nginx/nginx.conf.bak.fastapi if present
@@ -200,6 +200,11 @@ if [[ "$WITH_NGINX" == "1" ]]; then
   require_cmd nginx
   local_snippets_dir="$(detect_nginx_snippets_dir)"
   run rm -f "$local_snippets_dir/00-$APP_NAME.conf" "$local_snippets_dir/$APP_NAME.conf"
+  # Remove managed nginx config + systemd drop-in (newer provisioning uses these when nginx.conf
+  # does not already include conf.d/http.d snippets).
+  run rm -f /etc/nginx/nginx-fastapi.conf
+  run rm -f /etc/systemd/system/nginx.service.d/10-fastapi.conf
+  run systemctl daemon-reload
 
   if [[ "$RESTORE_NGINX_CONF" == "1" ]] && [[ -f /etc/nginx/nginx.conf.bak.fastapi ]]; then
     run cp -a /etc/nginx/nginx.conf.bak.fastapi /etc/nginx/nginx.conf

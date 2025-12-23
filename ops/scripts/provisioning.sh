@@ -53,6 +53,8 @@ What it does (one-time provisioning):
   - Optional nginx integration:
       Installs a vhost snippet into the directory that your nginx config includes
       (commonly /etc/nginx/http.d on Arch, sometimes /etc/nginx/conf.d).
+      If your stock /etc/nginx/nginx.conf does not include a snippets directory,
+      provisioning will configure nginx to use a project-managed config via a systemd drop-in.
       systemctl enable --now nginx
 
 Notes:
@@ -216,108 +218,44 @@ detect_nginx_snippets_dir() {
   fi
 }
 
-ensure_nginx_includes_dir() {
-  # Ensure /etc/nginx/nginx.conf loads per-site snippets from the given directory.
+nginx_conf_includes_snippets() {
+  # Returns 0 if /etc/nginx/nginx.conf includes the given snippets dir inside `http {}`.
   #
-  # If nginx.conf already includes it *inside the http {} block*, do nothing.
-  # Otherwise:
-  #  - remove any include of this dir outside of http {} (invalid for server/upstream snippets)
-  #  - insert an `include <dir>/*.conf;` immediately after the `http {` opening.
+  # Implemented in Python for readability/maintainability. See:
+  #   ops/scripts/nginx_conf_utils.py
   local snippets_dir="$1"
   local conf="/etc/nginx/nginx.conf"
-  local include_line="    include ${snippets_dir}/*.conf;"
-  local include_abs="${snippets_dir}/*.conf"
-  local include_rel="${snippets_dir#/etc/nginx/}/*.conf"
   local python_bin=""
+
+  if [[ ! -f "$conf" ]]; then
+    return 1
+  fi
 
   if command -v python3 >/dev/null 2>&1; then
     python_bin="python3"
   elif command -v python >/dev/null 2>&1; then
     python_bin="python"
   else
-    log "ERROR: python is required to edit $conf automatically (install python/python3)."
-    exit 1
+    log "WARN: python not found; cannot check nginx.conf snippets include automatically."
+    return 1
   fi
 
-  if [[ ! -f "$conf" ]]; then
-    log "ERROR: nginx config not found: $conf"
-    exit 1
-  fi
+  "$python_bin" "$REPO_ROOT/ops/scripts/nginx_conf_utils.py" includes-snippets --conf "$conf" --snippets-dir "$snippets_dir" >/dev/null 2>&1
+}
 
-  log "nginx: ensuring $conf includes snippets inside http {}: ${include_line#????}"
+install_nginx_managed_config() {
+  # Install a project-managed nginx config + a systemd drop-in so we don't need
+  # to patch the vendor /etc/nginx/nginx.conf.
+  local managed_conf_src="$1"
+  local service_override_src="$2"
+  local managed_conf_dst="/etc/nginx/nginx-fastapi.conf"
+  local override_dir="/etc/systemd/system/nginx.service.d"
+  local override_dst="$override_dir/10-fastapi.conf"
 
-  if [[ "$DRY_RUN" == "1" ]]; then
-    return 0
-  fi
-
-  # Use a small Python helper for correctness across awk implementations.
-  "$python_bin" - "$conf" "$include_abs" "$include_rel" <<'PY'
-import re
-import sys
-from pathlib import Path
-
-conf_path = Path(sys.argv[1])
-include_abs = sys.argv[2]
-include_rel = sys.argv[3]
-
-text = conf_path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
-
-targets = {include_abs, include_rel}
-
-include_re = re.compile(r"^\s*include\s+([^;]+)\s*;\s*$")
-
-def strip_comments(line: str) -> str:
-    # Good enough for nginx.conf (we don't try to parse quoted # chars).
-    return line.split("#", 1)[0]
-
-def parse_include_path(line: str) -> str | None:
-    m = include_re.match(strip_comments(line).rstrip("\n"))
-    if not m:
-        return None
-    path = m.group(1).strip()
-    if (path.startswith('"') and path.endswith('"')) or (path.startswith("'") and path.endswith("'")):
-        path = path[1:-1]
-    return path
-
-def is_target_include(line: str) -> bool:
-    path = parse_include_path(line)
-    return path in targets
-
-open_brace_idx: int | None = None
-
-for i, raw in enumerate(text):
-    s = strip_comments(raw)
-    if re.match(r"^\s*http\s*\{", s):
-        open_brace_idx = i
-        break
-    if re.match(r"^\s*http\s*$", s):
-        if i + 1 < len(text) and re.match(r"^\s*\{", strip_comments(text[i + 1])):
-            open_brace_idx = i + 1
-            break
-
-if open_brace_idx is None:
-    raise SystemExit("ERROR: could not find an 'http { }' block in /etc/nginx/nginx.conf")
-
-out: list[str] = []
-inserted = False
-
-for i, raw in enumerate(text):
-    # Remove any target include anywhere (inside or outside http). We'll re-add in the right place.
-    if is_target_include(raw):
-        continue
-
-    out.append(raw)
-
-    if i == open_brace_idx and not inserted:
-        out.append("    include " + include_abs + ";\n")
-        inserted = True
-
-backup = conf_path.with_suffix(conf_path.suffix + ".bak.fastapi")
-if not backup.exists():
-    backup.write_text("".join(text), encoding="utf-8")
-
-conf_path.write_text("".join(out), encoding="utf-8")
-PY
+  install_file "$managed_conf_src" "$managed_conf_dst" 0644
+  ensure_dir "$override_dir" 0755
+  install_file "$service_override_src" "$override_dst" 0644
+  run systemctl daemon-reload
 }
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -326,6 +264,8 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 SYSTEMD_SOCKET_SRC="$REPO_ROOT/ops/systemd/$UNIT_SOCKET"
 SYSTEMD_SERVICE_SRC="$REPO_ROOT/ops/systemd/$UNIT_SERVICE"
 NGINX_SRC="$REPO_ROOT/ops/nginx/$APP_NAME.conf"
+NGINX_MANAGED_CONF_SRC="$REPO_ROOT/ops/nginx/nginx-fastapi.conf"
+NGINX_MANAGED_OVERRIDE_SRC="$REPO_ROOT/ops/nginx/nginx-fastapi.service-override.conf"
 
 if [[ -z "$SOCKET_GROUP" ]]; then
   if [[ "$WITH_NGINX" == "1" ]]; then
@@ -402,7 +342,6 @@ log "[7/8] Optional nginx integration"
 if [[ "$WITH_NGINX" == "1" ]]; then
   require_cmd nginx
   NGINX_SNIPPETS_DIR="$(detect_nginx_snippets_dir)"
-  ensure_nginx_includes_dir "$NGINX_SNIPPETS_DIR"
   ensure_dir "$NGINX_SNIPPETS_DIR" 0755
   # Clean up legacy/duplicate installs from earlier versions of this repo.
   # (Having both fastAPI.conf and 00-fastAPI.conf loaded causes duplicate upstream/server errors.)
@@ -422,7 +361,17 @@ if [[ "$WITH_NGINX" == "1" ]]; then
   else
     install_file "$NGINX_SRC" "$NGINX_SNIPPETS_DIR/00-$APP_NAME.conf" 0644
   fi
-  run nginx -t
+
+  # If nginx.conf doesn't load snippets from this dir, switch nginx to a managed config
+  # (no edits to /etc/nginx/nginx.conf required).
+  if nginx_conf_includes_snippets "$NGINX_SNIPPETS_DIR"; then
+    run nginx -t
+  else
+    log "nginx: nginx.conf does not include $NGINX_SNIPPETS_DIR/*.conf inside http {}; using managed config via systemd drop-in"
+    install_nginx_managed_config "$NGINX_MANAGED_CONF_SRC" "$NGINX_MANAGED_OVERRIDE_SRC"
+    run nginx -t -c /etc/nginx/nginx-fastapi.conf
+  fi
+
   run systemctl enable --now nginx
   run systemctl reload nginx
 else

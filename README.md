@@ -85,7 +85,9 @@ Provisioning installs/creates:
 - systemd units: `/etc/systemd/system/fastAPI-unix.{socket,service}`
 - tmpfiles rule: `/etc/tmpfiles.d/fastAPI.conf` (creates `/run/fastAPI` on boot)
 - env file: `/etc/fastAPI/fastAPI.env`
-- nginx vhost (if enabled): installed into nginx’s included snippets dir (commonly `/etc/nginx/http.d/00-fastAPI.conf` on Arch)
+- nginx (if enabled):
+  - vhost snippet: `/etc/nginx/conf.d/00-fastAPI.conf` (or `/etc/nginx/http.d/00-fastAPI.conf` depending on distro)
+  - if your stock `/etc/nginx/nginx.conf` does not include snippet dirs, provisioning switches nginx to a project-managed config via systemd: `/etc/nginx/nginx-fastapi.conf`
 - venv base: `/var/lib/fastAPI` (per-release venvs under `/var/lib/fastAPI/venvs/`)
 
 ### Activity diagram for the Provisioning script. 
@@ -149,7 +151,7 @@ Run these on the server after provisioning + first deploy:
 ```bash
 sudo systemctl is-enabled --quiet fastAPI-unix.socket && echo "socket enabled"
 sudo systemctl is-active  --quiet fastAPI-unix.socket && echo "socket active"
-sudo nginx -t
+if [ -f /etc/nginx/nginx-fastapi.conf ]; then sudo nginx -t -c /etc/nginx/nginx-fastapi.conf; else sudo nginx -t; fi
 sudo curl --unix-socket /run/fastAPI/fastAPI.sock -fsS http://localhost/health
 curl -fsS http://127.0.0.1/health
 ```
@@ -157,15 +159,12 @@ curl -fsS http://127.0.0.1/health
 If `/health` works over the Unix socket but nginx returns `404`, verify nginx is loading the intended vhost and reload:
 
 ```bash
-sudo grep -nE 'include\\s+(/etc/nginx/)?(http\\.d|conf\\.d)/\\*\\.conf' /etc/nginx/nginx.conf || true
-sudo nginx -T | grep -nE "/etc/nginx/(http\\.d|conf\\.d)/00-fastAPI\\.conf|fastapi_upstream|/run/fastAPI/fastAPI\\.sock"
-sudo nginx -t
+if [ -f /etc/nginx/nginx-fastapi.conf ]; then sudo nginx -T -c /etc/nginx/nginx-fastapi.conf; else sudo nginx -T; fi | grep -nE "/etc/nginx/(http\\.d|conf\\.d)/00-fastAPI\\.conf|fastapi_upstream|/run/fastAPI/fastAPI\\.sock"
+if [ -f /etc/nginx/nginx-fastapi.conf ]; then sudo nginx -t -c /etc/nginx/nginx-fastapi.conf; else sudo nginx -t; fi
 sudo systemctl reload nginx
 ```
 
-If `nginx -t` fails with `"upstream" directive is not allowed here`, your snippets include is in the wrong context (outside `http {}`). Re-run provisioning with `--with-nginx` to automatically fix `nginx.conf`.
-
-Provisioning is safe to re-run: it may update `/etc/nginx/nginx.conf` to ensure the snippets include is *inside* `http {}` and will write a one-time backup at `/etc/nginx/nginx.conf.bak.fastapi`.
+If `nginx -t` fails with `"upstream" directive is not allowed here`, your stock `/etc/nginx/nginx.conf` is loading snippets in the wrong context. Re-run provisioning with `--with-nginx`; it will switch nginx to a project-managed config via a systemd drop-in (no manual edits to `nginx.conf` required).
 
 ---
 
@@ -255,6 +254,7 @@ sudo bash ops/scripts/teardown.sh --with-nginx --purge --remove-user
 Notes:
 - Teardown does not uninstall system packages.
 - If you host other sites in nginx using `conf.d`/`http.d`, don’t use `--with-nginx` unless you’re sure it’s safe.
+- If you previously ran older versions of this repo that edited `/etc/nginx/nginx.conf`, add `--restore-nginx-conf` to restore from `/etc/nginx/nginx.conf.bak.fastapi` (if present).
 
 ## Layout
 
