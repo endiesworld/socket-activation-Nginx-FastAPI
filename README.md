@@ -128,7 +128,7 @@ Check status/logs:
 ```bash
 systemctl status fastAPI-unix.socket
 systemctl status fastAPI-unix.service
-sudo journalctl -u fastAPI-unix.service -n 200 --no-pager
+sudo journalctl -u fastAPI-unix.service -n 20 --no-pager
 ```
 
 Via nginx (if you provisioned with `--with-nginx`):
@@ -156,7 +156,16 @@ sudo curl --unix-socket /run/fastAPI/fastAPI.sock -fsS http://localhost/health
 curl -fsS http://127.0.0.1/health
 ```
 
-If `/health` works over the Unix socket but nginx returns `404`, verify nginx is loading the intended vhost and reload:
+If `/health` works over the Unix socket but nginx returns `404`, first ensure the running nginx master process is using the intended config:
+
+```bash
+sudo systemctl show -p ExecStart nginx.service
+sudo ps -o pid,args -C nginx
+# If the master process isn't started with `-c /etc/nginx/nginx-fastapi.conf`, restart to pick up the systemd drop-in:
+sudo systemctl restart nginx
+```
+
+Then verify nginx is loading the intended vhost:
 
 ```bash
 if [ -f /etc/nginx/nginx-fastapi.conf ]; then sudo nginx -T -c /etc/nginx/nginx-fastapi.conf; else sudo nginx -T; fi | grep -nE "/etc/nginx/(http\\.d|conf\\.d)/00-fastAPI\\.conf|fastapi_upstream|/run/fastAPI/fastAPI\\.sock"

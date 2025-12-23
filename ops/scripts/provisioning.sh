@@ -348,6 +348,7 @@ run systemctl enable --now "$UNIT_SOCKET"
 log "[7/8] Optional nginx integration"
 if [[ "$WITH_NGINX" == "1" ]]; then
   require_cmd nginx
+  NGINX_NEEDS_RESTART=0
   NGINX_SNIPPETS_DIR="$(detect_nginx_snippets_dir)"
   ensure_dir "$NGINX_SNIPPETS_DIR" 0755
   # Clean up legacy/duplicate installs from earlier versions of this repo.
@@ -376,11 +377,18 @@ if [[ "$WITH_NGINX" == "1" ]]; then
   else
     log "nginx: nginx.conf does not include $NGINX_SNIPPETS_DIR/*.conf inside http {}; using managed config via systemd drop-in"
     install_nginx_managed_config "$NGINX_MANAGED_CONF_SRC" "$NGINX_MANAGED_OVERRIDE_SRC"
+    # If nginx was already running, a reload won't pick up the new ExecStart/config path.
+    # Restart to ensure the master process is started with `-c /etc/nginx/nginx-fastapi.conf`.
+    NGINX_NEEDS_RESTART=1
     run nginx -t -c /etc/nginx/nginx-fastapi.conf
   fi
 
   run systemctl enable --now nginx
-  run systemctl reload nginx
+  if [[ "$NGINX_NEEDS_RESTART" == "1" ]]; then
+    run systemctl restart nginx
+  else
+    run systemctl reload nginx
+  fi
 else
   log "Skipping nginx (pass --with-nginx to enable)"
 fi
