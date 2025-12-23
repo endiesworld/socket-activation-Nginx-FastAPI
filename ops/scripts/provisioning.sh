@@ -218,46 +218,20 @@ ensure_nginx_includes_dir() {
   local include_line="    include ${snippets_dir}/*.conf;"
   local include_abs="${snippets_dir}/*.conf"
   local include_rel="${snippets_dir#/etc/nginx/}/*.conf"
+  local python_bin=""
+
+  if command -v python3 >/dev/null 2>&1; then
+    python_bin="python3"
+  elif command -v python >/dev/null 2>&1; then
+    python_bin="python"
+  else
+    log "ERROR: python is required to edit $conf automatically (install python/python3)."
+    exit 1
+  fi
 
   if [[ ! -f "$conf" ]]; then
     log "ERROR: nginx config not found: $conf"
     exit 1
-  fi
-
-  # Detect whether the include exists *inside* the http {} block.
-  if awk -v abs="$include_abs" -v rel="$include_rel" '
-    function strip_comments(s) { sub(/#.*/, "", s); return s }
-    function count_char(s, c,  i, n) { n=0; for (i=1;i<=length(s);i++) if (substr(s,i,1)==c) n++; return n }
-    function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
-    function is_target_include(raw,   s, path) {
-      s = trim(strip_comments(raw))
-      if (s !~ /^include[ \t]+/) return 0
-      sub(/^include[ \t]+/, "", s)
-      s = trim(s)
-      sub(/[ \t]*;[ \t]*$/, "", s)
-      s = trim(s)
-      # Strip optional quotes.
-      if (s ~ /^".*"$/) { sub(/^"/, "", s); sub(/"$/, "", s) }
-      if (s ~ /^'\''.*'\''$/) { sub(/^'\''/, "", s); sub(/'\''$/, "", s) }
-      path = s
-      return (path == abs || path == rel)
-    }
-    BEGIN { in_http=0; pending_http=0; depth=0; found=0 }
-    {
-      line=strip_comments($0)
-      if (!in_http) {
-        if (line ~ /^[[:space:]]*http[[:space:]]*\\{/) { in_http=1; depth = count_char(line, "{") - count_char(line, "}"); next }
-        if (line ~ /^[[:space:]]*http[[:space:]]*$/) { pending_http=1; next }
-        if (pending_http && line ~ /^[[:space:]]*\\{/) { pending_http=0; in_http=1; depth = count_char(line, "{") - count_char(line, "}"); next }
-        next
-      }
-      if (is_target_include($0)) { found=1; exit 0 }
-      depth += count_char(line, "{") - count_char(line, "}")
-      if (depth <= 0) { in_http=0 }
-    }
-    END { exit(found ? 0 : 1) }
-  ' "$conf"; then
-    return 0
   fi
 
   log "nginx: ensuring $conf includes snippets inside http {}: ${include_line#????}"
@@ -266,92 +240,74 @@ ensure_nginx_includes_dir() {
     return 0
   fi
 
-  local tmp backup
-  tmp="$(mktemp)"
-  backup="${conf}.bak.fastapi"
-  cp -a "$conf" "$backup"
+  # Use a small Python helper for correctness across awk implementations.
+  "$python_bin" - "$conf" "$include_abs" "$include_rel" <<'PY'
+import re
+import sys
+from pathlib import Path
 
-  awk -v inc="$include_line" -v abs="$include_abs" -v rel="$include_rel" '
-    function strip_comments(s) { sub(/#.*/, "", s); return s }
-    function count_char(s, c,  i, n) { n=0; for (i=1;i<=length(s);i++) if (substr(s,i,1)==c) n++; return n }
-    function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
-    function is_target_include(raw,   s, path) {
-      s = trim(strip_comments(raw))
-      if (s !~ /^include[ \t]+/) return 0
-      sub(/^include[ \t]+/, "", s)
-      s = trim(s)
-      sub(/[ \t]*;[ \t]*$/, "", s)
-      s = trim(s)
-      if (s ~ /^".*"$/) { sub(/^"/, "", s); sub(/"$/, "", s) }
-      if (s ~ /^'\''.*'\''$/) { sub(/^'\''/, "", s); sub(/'\''$/, "", s) }
-      path = s
-      return (path == abs || path == rel)
-    }
-    BEGIN { in_http=0; pending_http=0; depth=0; inserted=0; saw_http=0 }
-    {
-      raw=$0
-      line=strip_comments(raw)
+conf_path = Path(sys.argv[1])
+include_abs = sys.argv[2]
+include_rel = sys.argv[3]
 
-      if (!in_http) {
-        # Drop includes of this dir outside http {} (they cause "upstream/server not allowed here").
-        if (is_target_include(raw)) { next }
+text = conf_path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
 
-        if (line ~ /^[[:space:]]*http[[:space:]]*\\{/) {
-          in_http=1
-          saw_http=1
-          depth = count_char(line, "{") - count_char(line, "}")
-          print raw
-          if (!inserted) { print inc; inserted=1 }
-          next
-        }
-        if (line ~ /^[[:space:]]*http[[:space:]]*$/) {
-          pending_http=1
-          print raw
-          next
-        }
-        if (pending_http && line ~ /^[[:space:]]*\\{/) {
-          pending_http=0
-          in_http=1
-          saw_http=1
-          depth = count_char(line, "{") - count_char(line, "}")
-          print raw
-          if (!inserted) { print inc; inserted=1 }
-          next
-        }
+targets = {include_abs, include_rel}
 
-        print raw
-        next
-      }
+include_re = re.compile(r"^\s*include\s+([^;]+)\s*;\s*$")
 
-      print raw
-      depth += count_char(line, "{") - count_char(line, "}")
-      if (depth <= 0) { in_http=0 }
-    }
-    END {
-      if (!saw_http) {
-        exit 2
-      }
-    }
-  ' "$conf" >"$tmp"
+def strip_comments(line: str) -> str:
+    # Good enough for nginx.conf (we don't try to parse quoted # chars).
+    return line.split("#", 1)[0]
 
-  if ! awk 'END{exit 0}' "$tmp" >/dev/null 2>&1; then
-    rm -f "$tmp"
-    log "ERROR: failed to render updated nginx.conf"
-    exit 1
-  fi
+def parse_include_path(line: str) -> str | None:
+    m = include_re.match(strip_comments(line).rstrip("\n"))
+    if not m:
+        return None
+    path = m.group(1).strip()
+    if (path.startswith('"') and path.endswith('"')) or (path.startswith("'") and path.endswith("'")):
+        path = path[1:-1]
+    return path
 
-  # If we couldn't locate an http {} block, restore from backup and fail with guidance.
-  if ! grep -Eq '^[[:space:]]*http[[:space:]]*\\{' "$tmp"; then
-    rm -f "$tmp"
-    log "ERROR: could not locate an 'http { }' block in $conf to insert an include."
-    log "Restore backup: $backup"
-    log "Manual fix: add this line inside the http { } block:"
-    log "  ${include_line#????}"
-    exit 1
-  fi
+def is_target_include(line: str) -> bool:
+    path = parse_include_path(line)
+    return path in targets
 
-  install -m 0644 "$tmp" "$conf"
-  rm -f "$tmp"
+open_brace_idx: int | None = None
+
+for i, raw in enumerate(text):
+    s = strip_comments(raw)
+    if re.match(r"^\s*http\s*\{", s):
+        open_brace_idx = i
+        break
+    if re.match(r"^\s*http\s*$", s):
+        if i + 1 < len(text) and re.match(r"^\s*\{", strip_comments(text[i + 1])):
+            open_brace_idx = i + 1
+            break
+
+if open_brace_idx is None:
+    raise SystemExit("ERROR: could not find an 'http { }' block in /etc/nginx/nginx.conf")
+
+out: list[str] = []
+inserted = False
+
+for i, raw in enumerate(text):
+    # Remove any target include anywhere (inside or outside http). We'll re-add in the right place.
+    if is_target_include(raw):
+        continue
+
+    out.append(raw)
+
+    if i == open_brace_idx and not inserted:
+        out.append("    include " + include_abs + ";\n")
+        inserted = True
+
+backup = conf_path.with_suffix(conf_path.suffix + ".bak.fastapi")
+if not backup.exists():
+    backup.write_text("".join(text), encoding="utf-8")
+
+conf_path.write_text("".join(out), encoding="utf-8")
+PY
 }
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -438,6 +394,9 @@ if [[ "$WITH_NGINX" == "1" ]]; then
   NGINX_SNIPPETS_DIR="$(detect_nginx_snippets_dir)"
   ensure_nginx_includes_dir "$NGINX_SNIPPETS_DIR"
   ensure_dir "$NGINX_SNIPPETS_DIR" 0755
+  # Clean up legacy/duplicate installs from earlier versions of this repo.
+  # (Having both fastAPI.conf and 00-fastAPI.conf loaded causes duplicate upstream/server errors.)
+  run rm -f "$NGINX_SNIPPETS_DIR/$APP_NAME.conf" || true
   # Install with a "00-" prefix to make it the default vhost on setups that
   # don't explicitly configure a default_server (common on minimal hosts).
   install_file "$NGINX_SRC" "$NGINX_SNIPPETS_DIR/00-$APP_NAME.conf" 0644

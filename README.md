@@ -145,6 +145,10 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
+If `nginx -t` fails with `"upstream" directive is not allowed here`, your snippets include is in the wrong context (outside `http {}`). Re-run provisioning with `--with-nginx` to automatically fix `nginx.conf`.
+
+Provisioning is safe to re-run: it may update `/etc/nginx/nginx.conf` to ensure the snippets include is *inside* `http {}` and will write a one-time backup at `/etc/nginx/nginx.conf.bak.fastapi`.
+
 ---
 
 ## Updating (deploying a new version)
