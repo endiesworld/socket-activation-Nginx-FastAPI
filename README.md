@@ -4,6 +4,9 @@ Minimal FastAPI app with a `/health` endpoint, intended to run on Linux via **sy
 
 Repository URL (current upstream): `https://github.com/endiesworld/socket-activation-Nginx-FastAPI.git`
 
+## Architecture
+![Architecture-diagram](#) ![./Assets/System-architecture.png](https://github.com/endiesworld/socket-activation-Nginx-FastAPI/blob/main/Assets/System-architecture.png)
+
 ## Workflow (recommended)
 
 Keep **two separate phases**:
